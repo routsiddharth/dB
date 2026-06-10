@@ -25,7 +25,19 @@ At 100% no tap is active and audio flows completely untouched.
 
 ## Install
 
-Build from source (requires Xcode command line tools):
+### Download (recommended)
+
+1. Grab the latest **`dB-x.y.z.dmg`** from the
+   [Releases page](../../releases/latest).
+2. Open the DMG and drag **dB** into your **Applications** folder.
+3. **First launch only:** right-click (or Control-click) **dB** in Applications
+   and choose **Open**, then click **Open** again. This step is required because
+   the app isn't notarized yet — after the first time, it opens normally.
+4. Click the **dB** label in your menu bar.
+
+### Build from source
+
+Requires the Xcode command line tools:
 
 ```sh
 git clone <this repo>
@@ -35,6 +47,16 @@ open dist/dB.app
 ```
 
 Optionally move `dist/dB.app` to `/Applications`.
+
+### Cutting a release (maintainers)
+
+Pushing a version tag builds the app and publishes a DMG to GitHub Releases
+automatically via GitHub Actions:
+
+```sh
+git tag v1.0.0
+git push origin v1.0.0
+```
 
 ## Permissions
 

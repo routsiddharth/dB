@@ -1,0 +1,111 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version for a manual build (e.g. 1.0.0)"
+        required: false
+        default: "0.0.0-dev"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Show toolchain
+        run: swift --version && sw_vers
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building version ${VERSION}"
+
+      - name: Stamp Info.plist version
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION}" Resources/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${GITHUB_RUN_NUMBER}" Resources/Info.plist
+
+      - name: Build app bundle
+        run: ./build.sh release
+
+      - name: Package DMG
+        id: dmg
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          DMG="dB-${VERSION}.dmg"
+          APP="dist/dB.app"
+          test -d "$APP"
+
+          brew install create-dmg >/dev/null
+
+          create-dmg \
+            --volname "dB" \
+            --window-pos 200 120 \
+            --window-size 540 380 \
+            --icon-size 110 \
+            --icon "dB.app" 150 190 \
+            --app-drop-link 390 190 \
+            --no-internet-enable \
+            "$DMG" "$APP" || true
+
+          # create-dmg can exit non-zero in CI even on success; fall back to
+          # a plain hdiutil DMG if the file wasn't produced.
+          if [ ! -f "$DMG" ]; then
+            echo "create-dmg did not produce a DMG; using hdiutil fallback."
+            STAGING="dmg-staging"
+            rm -rf "$STAGING" && mkdir -p "$STAGING"
+            cp -R "$APP" "$STAGING/"
+            ln -s /Applications "$STAGING/Applications"
+            hdiutil create -volname "dB" -srcfolder "$STAGING" -ov -format UDZO "$DMG"
+          fi
+
+          echo "dmg=${DMG}" >> "$GITHUB_OUTPUT"
+          ls -lh "$DMG"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dB-dmg
+          path: ${{ steps.dmg.outputs.dmg }}
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.dmg.outputs.dmg }}
+          generate_release_notes: true
+          body: |
+            ## Install
+
+            1. Download **${{ steps.dmg.outputs.dmg }}** below.
+            2. Open the DMG and drag **dB** into your **Applications** folder.
+            3. **First launch only:** right-click (or Control-click) **dB** in
+               Applications and choose **Open**, then click **Open** again.
+               This is required because the app isn't notarized yet — after the
+               first time, it opens normally.
+            4. Click the **dB** label in your menu bar.
+
+            > The first time you lower an app's volume, macOS will ask for
+            > **System Audio Recording** permission — that's what the per-app
+            > volume API requires. Nothing is recorded.
