@@ -17,18 +17,29 @@ struct AppVolumeEntry: Identifiable, Equatable {
     }
 }
 
+/// An app dB has seen at least once, for the "Manage Apps" settings list.
+struct KnownApp: Identifiable, Equatable {
+    let id: String          // grouping key
+    let name: String
+    let icon: NSImage?
+    let isHidden: Bool
+}
+
 @MainActor
 final class AudioMixer: ObservableObject {
     private static let logger = Logger(subsystem: "com.siddharthrout.dB", category: "AudioMixer")
     private static let volumesDefaultsKey = "perAppVolumes"
+    private static let hiddenKeysDefaultsKey = "hiddenAppKeys"
+    private static let knownAppsDefaultsKey = "knownAppNames"
     private static let systemSoundsKey = "system-sounds"
-    /// Grouping keys (bundle IDs) that are always hidden from the mixer.
-    private static let excludedKeys: Set<String> = [
-        "com.apple.MobileSMS", // Messages
-    ]
 
     @Published private(set) var entries: [AppVolumeEntry] = []
     @Published var lastError: String?
+    /// Keys the user has chosen to hide from the quick-view mixer.
+    @Published private(set) var hiddenKeys: Set<String>
+    /// Every app dB has ever shown (key -> last known display name), persisted
+    /// so the user can manage and un-hide apps even when they aren't running.
+    @Published private(set) var knownAppNames: [String: String]
 
     private var taps: [String: ProcessTap] = [:]
     private var savedVolumes: [String: Float]
@@ -41,6 +52,8 @@ final class AudioMixer: ObservableObject {
     init() {
         let raw = UserDefaults.standard.dictionary(forKey: Self.volumesDefaultsKey) as? [String: Double] ?? [:]
         savedVolumes = raw.mapValues { Float($0) }
+        hiddenKeys = Set(UserDefaults.standard.stringArray(forKey: Self.hiddenKeysDefaultsKey) ?? [])
+        knownAppNames = UserDefaults.standard.dictionary(forKey: Self.knownAppsDefaultsKey) as? [String: String] ?? [:]
 
         refresh()
         installListeners()
@@ -78,6 +91,54 @@ final class AudioMixer: ObservableObject {
         taps.removeValue(forKey: key)
     }
 
+    // MARK: - Hiding apps
+
+    /// All apps dB has ever shown, for the management list — sorted by name,
+    /// each flagged with its current hidden state.
+    var manageableApps: [KnownApp] {
+        knownAppNames.map { key, name in
+            KnownApp(id: key, name: name, icon: managementIcon(for: key), isHidden: hiddenKeys.contains(key))
+        }
+        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    func setHidden(_ hidden: Bool, for key: String) {
+        if hidden {
+            hiddenKeys.insert(key)
+        } else {
+            hiddenKeys.remove(key)
+        }
+        UserDefaults.standard.set(Array(hiddenKeys), forKey: Self.hiddenKeysDefaultsKey)
+        refresh()
+    }
+
+    /// Forget an app entirely (remove from the registry and un-hide it). It will
+    /// reappear in the registry if it plays audio again.
+    func forget(key: String) {
+        knownAppNames.removeValue(forKey: key)
+        hiddenKeys.remove(key)
+        persistKnownApps()
+        UserDefaults.standard.set(Array(hiddenKeys), forKey: Self.hiddenKeysDefaultsKey)
+        refresh()
+    }
+
+    /// Best-effort icon for the management list, even when the app isn't running.
+    private func managementIcon(for key: String) -> NSImage? {
+        if key == Self.systemSoundsKey { return nil }
+        if let cached = iconCache[key] { return cached }
+        if let app = NSRunningApplication.runningApplications(withBundleIdentifier: key).first,
+           let icon = app.icon {
+            iconCache[key] = icon
+            return icon
+        }
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: key) {
+            let icon = NSWorkspace.shared.icon(forFile: url.path)
+            iconCache[key] = icon
+            return icon
+        }
+        return nil
+    }
+
     // MARK: - Discovery
 
     func refresh() {
@@ -104,11 +165,11 @@ final class AudioMixer: ObservableObject {
         }
 
         var newEntries: [AppVolumeEntry] = []
+        var knownChanged = false
         for (key, group) in groups {
             if group.isRunningOutput {
                 sessionActive.insert(key)
             }
-            if Self.excludedKeys.contains(key) { continue }
 
             let hasCustomVolume = (savedVolumes[key] ?? 1) != 1
             let isSystem = key == Self.systemSoundsKey
@@ -135,6 +196,18 @@ final class AudioMixer: ObservableObject {
             guard eligible else { continue }
 
             let (name, icon) = displayInfo(for: key, pids: group.pids)
+
+            // Record every legitimate app in the persistent registry so it can
+            // be managed (hidden / un-hidden) from settings later.
+            if knownAppNames[key] != name {
+                knownAppNames[key] = name
+                knownChanged = true
+            }
+
+            // The user has hidden this app from the quick-view mixer. Its tap
+            // (if any) is left untouched so a custom volume keeps applying.
+            if hiddenKeys.contains(key) { continue }
+
             newEntries.append(AppVolumeEntry(
                 id: key,
                 name: name,
@@ -144,6 +217,7 @@ final class AudioMixer: ObservableObject {
                 objectIDs: group.objectIDs.sorted()
             ))
         }
+        if knownChanged { persistKnownApps() }
 
         newEntries.sort {
             if $0.isSystemSounds != $1.isSystemSounds { return $0.isSystemSounds }
@@ -294,5 +368,9 @@ final class AudioMixer: ObservableObject {
             savedVolumes.mapValues { Double($0) },
             forKey: Self.volumesDefaultsKey
         )
+    }
+
+    private func persistKnownApps() {
+        UserDefaults.standard.set(knownAppNames, forKey: Self.knownAppsDefaultsKey)
     }
 }

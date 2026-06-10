@@ -4,6 +4,7 @@ import SwiftUI
 
 struct MixerView: View {
     @EnvironmentObject private var mixer: AudioMixer
+    @Environment(\.openWindow) private var openWindow
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     var body: some View {
@@ -50,6 +51,10 @@ struct MixerView: View {
                 .font(.headline)
             Spacer()
             Menu {
+                Button("Manage Apps…") {
+                    openWindow(id: "manage-apps")
+                    NSApp.activate(ignoringOtherApps: true)
+                }
                 Toggle("Launch at Login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in
                         do {

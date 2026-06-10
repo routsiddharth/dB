@@ -15,6 +15,12 @@ struct DBApp: App {
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
         }
         .menuBarExtraStyle(.window)
+
+        Window("Manage Apps", id: "manage-apps") {
+            ManageAppsView()
+                .environmentObject(mixer)
+        }
+        .windowResizability(.contentSize)
     }
 }
 
