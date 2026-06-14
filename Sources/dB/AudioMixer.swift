@@ -31,7 +31,22 @@ final class AudioMixer: ObservableObject {
     private static let volumesDefaultsKey = "perAppVolumes"
     private static let hiddenKeysDefaultsKey = "hiddenAppKeys"
     private static let knownAppsDefaultsKey = "knownAppNames"
+    private static let didSeedHiddenDefaultsKey = "didSeedDefaultHidden"
     private static let systemSoundsKey = "system-sounds"
+
+    /// Apple apps that are `.regular` (so the activation-policy filter can't
+    /// catch them) but only ever hold an audio stream to play short alert /
+    /// notification sounds — not media you'd want to balance. They're hidden by
+    /// default so a fresh install is a media mixer, not an everything-that-beeps
+    /// list. Still discoverable and un-hideable in Manage Apps; once a user
+    /// un-hides one, we never re-hide it (see `didSeedHiddenDefaultsKey`).
+    private static let defaultHiddenBundleIDs: Set<String> = [
+        "com.apple.MobileSMS",   // Messages
+        "com.apple.mail",        // Mail
+        "com.apple.iCal",        // Calendar
+        "com.apple.reminders",   // Reminders
+        "com.apple.clock",       // Clock (alarms / timers)
+    ]
 
     @Published private(set) var entries: [AppVolumeEntry] = []
     @Published var lastError: String?
@@ -43,9 +58,6 @@ final class AudioMixer: ObservableObject {
 
     private var taps: [String: ProcessTap] = [:]
     private var savedVolumes: [String: Float]
-    /// Keys that have produced audio at some point during this session; they
-    /// stay visible in the mixer until the owning process goes away.
-    private var sessionActive: Set<String> = []
     private var refreshTimer: Timer?
     private var iconCache: [String: NSImage] = [:]
 
@@ -54,6 +66,15 @@ final class AudioMixer: ObservableObject {
         savedVolumes = raw.mapValues { Float($0) }
         hiddenKeys = Set(UserDefaults.standard.stringArray(forKey: Self.hiddenKeysDefaultsKey) ?? [])
         knownAppNames = UserDefaults.standard.dictionary(forKey: Self.knownAppsDefaultsKey) as? [String: String] ?? [:]
+
+        // One-time seed: hide the well-known alert-only Apple apps. Guarded by a
+        // flag so we only do it on first launch and never override a user who
+        // later un-hides one of them.
+        if !UserDefaults.standard.bool(forKey: Self.didSeedHiddenDefaultsKey) {
+            hiddenKeys.formUnion(Self.defaultHiddenBundleIDs)
+            UserDefaults.standard.set(Array(hiddenKeys), forKey: Self.hiddenKeysDefaultsKey)
+            UserDefaults.standard.set(true, forKey: Self.didSeedHiddenDefaultsKey)
+        }
 
         refresh()
         installListeners()
@@ -145,7 +166,6 @@ final class AudioMixer: ObservableObject {
         struct Group {
             var objectIDs: [AudioObjectID] = []
             var pids: [pid_t] = []
-            var isRunningOutput = false
         }
 
         var groups: [String: Group] = [:]
@@ -158,19 +178,12 @@ final class AudioMixer: ObservableObject {
             var group = groups[key] ?? Group()
             group.objectIDs.append(object)
             group.pids.append(pid)
-            if CoreAudioUtils.isRunningOutput(object) {
-                group.isRunningOutput = true
-            }
             groups[key] = group
         }
 
         var newEntries: [AppVolumeEntry] = []
         var knownChanged = false
         for (key, group) in groups {
-            if group.isRunningOutput {
-                sessionActive.insert(key)
-            }
-
             let hasCustomVolume = (savedVolumes[key] ?? 1) != 1
             let isSystem = key == Self.systemSoundsKey
 
@@ -178,20 +191,17 @@ final class AudioMixer: ObservableObject {
             //  - System Sounds: always.
             //  - .regular apps (Spotify, Chrome, …): show whenever they hold an
             //    audio stream, even paused — so you can pre-set their volume.
-            //  - .accessory agents (Control Center, menu bar apps): only while
-            //    actually playing, to avoid clutter.
+            //  - .accessory agents (PowerChime, Screenshot, menu-bar widgets):
+            //    never auto-shown. They emit one-shot sounds and would otherwise
+            //    pin a permanent, useless row in the mixer.
             //  - daemons with no app / .prohibited (CoreSpeech, avconferenced): hide.
-            // A user-set custom volume always keeps a row visible.
-            let isPlaying = group.isRunningOutput || sessionActive.contains(key)
+            // A user-set custom volume always keeps a row visible, so anything
+            // you've adjusted stays reachable regardless of activation policy.
             let eligible: Bool
             if isSystem || hasCustomVolume {
                 eligible = true
             } else {
-                switch appActivationPolicy(for: key, pids: group.pids) {
-                case .regular: eligible = true
-                case .accessory: eligible = isPlaying
-                default: eligible = false
-                }
+                eligible = appActivationPolicy(for: key, pids: group.pids) == .regular
             }
             guard eligible else { continue }
 
@@ -228,9 +238,8 @@ final class AudioMixer: ObservableObject {
             entries = newEntries
         }
 
-        // Drop session/tap state for processes that went away.
+        // Drop taps for processes that went away.
         let liveKeys = Set(groups.keys)
-        sessionActive.formIntersection(liveKeys)
         for (key, tap) in taps where !liveKeys.contains(key) {
             tap.invalidate()
             taps.removeValue(forKey: key)
