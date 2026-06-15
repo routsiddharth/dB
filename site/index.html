@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#eef0f7" />
+<title>dB — per-app volume for the macOS menu bar</title>
+<meta name="description" content="A separate volume for every app, right from your menu bar. Turn Chrome down without touching Spotify." />
+
+<style>
+  :root{
+    --ink:#1d1c1a; --dim:#5f5e5a; --faint:#9a988f;
+    --hair:rgba(0,0,0,.09); --hair-soft:rgba(0,0,0,.055);
+    --blue:#0a84ff;
+    --maxw:1180px;
+    --ease:cubic-bezier(.2,.6,.2,1);
+    --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Helvetica Neue",system-ui,sans-serif;
+    --pop-w:472px;
+    --bar-h:32px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;color:var(--ink);
+    font-family:var(--font);font-weight:400;
+    font-size:16px;line-height:1.55;letter-spacing:-.003em;
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+    overflow-x:hidden;min-height:100vh;
+    /* premium macOS-wallpaper-style mesh: soft directional dawn light, harmonized pastels */
+    background:
+      radial-gradient(78% 58% at 16% 6%, rgba(255,230,212,.82) 0%, rgba(255,230,212,0) 60%),
+      radial-gradient(74% 70% at 90% 16%, rgba(198,219,255,.88) 0%, rgba(198,219,255,0) 55%),
+      radial-gradient(92% 82% at 72% 104%, rgba(221,206,250,.72) 0%, rgba(221,206,250,0) 55%),
+      linear-gradient(158deg, #ecf0f8 0%, #f1edf6 50%, #f7f1ea 100%);
+    background-attachment:fixed;
+  }
+  /* fine film grain — kills banding, reads as a real wallpaper, not a flat blob */
+  body::after{
+    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.05;mix-blend-mode:soft-light;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  ::selection{background:rgba(10,132,255,.16);color:var(--ink)}
+  a{color:inherit;text-decoration:none}
+  .shell{max-width:var(--maxw);margin:0 auto;padding:0 40px}
+  @media(max-width:760px){.shell{padding:0 22px}}
+
+  /* ---------- simulated macOS menu bar ---------- */
+  .menubar{
+    position:absolute;top:0;left:0;right:0;z-index:40;height:var(--bar-h);
+    background:rgba(255,255,255,.5);
+    backdrop-filter:blur(20px) saturate(1.6);-webkit-backdrop-filter:blur(20px) saturate(1.6);
+    border-bottom:.5px solid rgba(0,0,0,.07);
+  }
+  .menubar-inner{max-width:var(--maxw);margin:0 auto;padding:0 40px;height:var(--bar-h);display:flex;align-items:center;justify-content:flex-end}
+  @media(max-width:760px){.menubar-inner{padding:0 18px}}
+  .mb-cluster{display:flex;align-items:center;gap:14px;font-size:13px}
+  .mb-ico{display:flex;align-items:center;color:rgba(29,28,26,.84);height:var(--bar-h)}
+  .mb-db{
+    font-weight:700;letter-spacing:-.02em;font-size:13.5px;line-height:1;
+    padding:4px 8px;border-radius:6px;background:rgba(10,132,255,.18);color:#0a5bd6;
+  }
+  .mb-clock{font-weight:400;color:rgba(29,28,26,.86);font-size:13px;letter-spacing:0;white-space:nowrap}
+  .mb-avatar{width:17px;height:17px;border-radius:50%;background:conic-gradient(from 210deg,#ff8a5b,#a06bff,#5b9cff,#ff8a5b)}
+  .mb-siri{width:16px;height:16px;border-radius:50%;background:conic-gradient(from 0deg,#ff5e8a,#ff8a3d,#ffd23d,#3ddc97,#3d9bff,#a05bff,#ff5e8a)}
+  .mb-A{font-weight:600;font-size:11px;border:1.4px solid currentColor;border-radius:4px;width:18px;height:16px;display:flex;align-items:center;justify-content:center;line-height:1}
+  @media(max-width:560px){.mb-hide-sm{display:none}}
+
+  /* ---------- hero (the whole site) ---------- */
+  .hero{position:relative;z-index:2;min-height:100vh;padding-top:clamp(56px,9vh,80px);padding-bottom:56px}
+  .copy{max-width:540px}
+  @media(max-width:980px){.copy{max-width:none}}
+
+  .logo-d{display:inline-flex;align-items:baseline;font-weight:800;letter-spacing:-.045em;line-height:1}
+  .logo-d .d{color:var(--ink)}
+  .logo-d .b{color:var(--blue)}
+  .h-lead{font-size:clamp(42px,6vw,70px);font-weight:700;line-height:1.0;letter-spacing:-.035em;margin:0}
+  .sub{color:var(--dim);font-size:clamp(16px,1.6vw,19px);line-height:1.55;max-width:38ch}
+
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;
+    padding:12px 22px;border-radius:999px;font-size:15px;font-weight:500;
+    background:var(--ink);color:#fff;border:1px solid var(--ink);
+    transition:transform .25s var(--ease),opacity .25s;
+  }
+  .btn:hover{transform:translateY(-1px);opacity:.92}
+  .btn svg{transition:transform .35s var(--ease)}
+  .btn:hover svg{transform:translateY(2px)}
+  .btn-ghost{
+    display:inline-flex;align-items:center;gap:8px;
+    padding:12px 22px;border-radius:999px;font-size:15px;font-weight:500;
+    background:rgba(255,255,255,.45);color:var(--ink);border:1px solid var(--hair);
+    transition:border-color .25s,background .25s;
+  }
+  .btn-ghost:hover{border-color:var(--ink);background:rgba(255,255,255,.75)}
+  .chip{
+    display:inline-flex;align-items:center;gap:7px;
+    padding:8px 15px;border-radius:999px;font-size:13.5px;font-weight:500;color:var(--dim);
+    background:rgba(255,255,255,.4);border:.5px solid var(--hair);
+  }
+  .chip svg{color:var(--blue)}
+
+  /* ---------- the popover (anchored to the dB by JS) ---------- */
+  .pop-wrap{position:absolute;top:0;left:0;width:var(--pop-w);z-index:30}
+  .popover{
+    width:var(--pop-w);background:#fff;border-radius:20px;
+    border:.5px solid rgba(0,0,0,.07);
+    box-shadow:0 0 0 .5px rgba(0,0,0,.02),0 3px 10px rgba(20,20,30,.07),0 28px 70px rgba(20,20,30,.20);
+    padding:8px;overflow:hidden;
+  }
+  .pop-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px 12px}
+  .pop-title{font-size:18px;font-weight:600;letter-spacing:-.01em}
+  .pop-more{
+    width:27px;height:27px;border-radius:50%;border:none;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    color:var(--faint);background:rgba(0,0,0,.05);transition:background .2s,color .2s;
+  }
+  .pop-more:hover{background:rgba(0,0,0,.09);color:var(--dim)}
+  .pop-div{height:.5px;background:rgba(0,0,0,.08);margin:0 16px}
+
+  .prow{padding:13px 16px;border-radius:12px;transition:background .4s var(--ease)}
+  .prow-top{display:flex;align-items:center;gap:13px}
+  .picon{width:32px;height:32px;flex:none;display:block}
+  .picon svg,.picon .ico,.picon img{display:block;width:32px;height:32px}
+  .pname{font-size:17px;font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ppct{font-size:15px;font-weight:500;color:var(--faint);font-variant-numeric:tabular-nums}
+  .prow-ctl{display:flex;align-items:center;gap:13px;margin-top:13px}
+  .prow-ctl .glyph{color:#bcbcc2;flex:none;display:flex}
+
+  .pslider{position:relative;flex:1;height:22px;display:flex;align-items:center;cursor:pointer;touch-action:none}
+  .ptrack{position:relative;width:100%;height:6px;background:#e4e4e8;border-radius:3px}
+  .pfill{position:absolute;left:0;top:0;height:100%;background:var(--blue);border-radius:3px}
+  .pthumb{
+    position:absolute;top:50%;left:0;width:20px;height:20px;border-radius:50%;background:#fff;
+    transform:translate(-50%,-50%);
+    box-shadow:0 1px 3px rgba(0,0,0,.28),0 0 0 .5px rgba(0,0,0,.06);
+    transition:box-shadow .18s ease;
+  }
+  .pslider:hover .pthumb,.pslider:focus-visible .pthumb{box-shadow:0 1px 5px rgba(0,0,0,.32),0 0 0 .5px rgba(0,0,0,.08)}
+  .pslider:active .pthumb{box-shadow:0 0 0 6px rgba(10,132,255,.14),0 1px 3px rgba(0,0,0,.28)}
+  .pslider:focus-visible{outline:none}
+  .preset{border:none;background:none;cursor:pointer;color:#bcbcc2;flex:none;display:flex;align-items:center;padding:0;transition:color .2s}
+  .preset:hover:not(:disabled){color:var(--dim)}
+  .preset:disabled{opacity:.45;cursor:default}
+  .pop-cap{text-align:center;color:var(--faint);font-size:13.5px;margin-top:18px}
+
+  /* mobile: drop the popover back into flow under the copy */
+  @media(max-width:980px){
+    :root{--pop-w:min(440px,calc(100vw - 44px))}
+    .pop-wrap{position:static !important;left:auto !important;top:auto !important;margin:48px auto 0}
+  }
+
+  /* load-in */
+  .reveal{opacity:0;transform:translateY(14px);animation:rise .8s var(--ease) forwards}
+  .d1{animation-delay:.05s}.d2{animation-delay:.13s}.d3{animation-delay:.21s}
+  .d4{animation-delay:.29s}.d5{animation-delay:.37s}.d6{animation-delay:.18s}
+  @keyframes rise{to{opacity:1;transform:none}}
+  @media(prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;animation:none}}
+</style>
+</head>
+<body>
+
+<!-- ============ simulated macOS menu bar ============ -->
+<div class="menubar">
+  <div class="menubar-inner">
+    <div class="mb-cluster">
+      <span class="mb-db" id="mb-db">dB</span>
+      <span class="mb-ico mb-hide-sm" title="Granola"><img src="assets/icons/granola-mono.png" alt="Granola" width="17" height="17" style="display:block;opacity:.84"></span>
+      <span class="mb-ico mb-hide-sm" title="Now Playing"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="4.5"/><path d="M10 8.5l6 3.5-6 3.5z" fill="currentColor" stroke="none"/></svg></span>
+      <span class="mb-ico mb-hide-sm" title="Screen Mirroring"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="11" rx="1.5"/><path d="M8.5 20h7l-3.5-4z" fill="currentColor" stroke="none"/></svg></span>
+      <span class="mb-ico mb-hide-sm" title="Bluetooth"><svg width="13" height="16" viewBox="0 0 18 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7l8 10-4 3V4l4 3-8 10"/></svg></span>
+      <span class="mb-ico" title="Volume"><svg width="17" height="15" viewBox="0 0 22 18" fill="currentColor"><path d="M2 6.5h3.2L9.5 3v12L5.2 11.5H2z"/><path d="M12.5 5.5a4.5 4.5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M15 3a8 8 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+      <span class="mb-ico" title="Battery charging">
+        <svg width="27" height="16" viewBox="0 0 30 16" fill="none">
+          <rect x="1" y="3" width="23" height="10" rx="2.4" stroke="rgba(29,28,26,.48)" stroke-width="1.2"/>
+          <rect x="2.6" y="4.6" width="16" height="6.8" rx="1.3" fill="#34c759"/>
+          <path d="M11.5 4.4l-3 4.2h2.4l-.6 3 3-4.2h-2.4z" fill="#0c0c0d"/>
+          <path d="M26 5.5v5c1.1-.3 1.7-1.1 1.7-2.5S27.1 5.8 26 5.5z" fill="rgba(29,28,26,.48)"/>
+        </svg>
+      </span>
+      <span class="mb-ico" title="Wi-Fi"><svg width="18" height="14" viewBox="0 0 22 16" fill="currentColor"><path d="M11 3.2c3.1 0 5.9 1.2 8 3.2l-1.4 1.5A9.4 9.4 0 0 0 11 5.3 9.4 9.4 0 0 0 4.4 7.9L3 6.4A11.5 11.5 0 0 1 11 3.2zm0 4.1c2 0 3.8.8 5.1 2.1l-1.4 1.5A5.2 5.2 0 0 0 11 9.3c-1.4 0-2.7.6-3.7 1.6L5.9 9.5A7.3 7.3 0 0 1 11 7.3zm0 4.2c.9 0 1.7.4 2.3 1L11 14.8l-2.3-2.3c.6-.6 1.4-1 2.3-1z"/></svg></span>
+      <span class="mb-ico mb-hide-sm" title="Input Source"><span class="mb-A">A</span></span>
+      <span class="mb-ico mb-hide-sm" title="Spotlight"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/></svg></span>
+      <span class="mb-ico" title="Control Center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3.5" width="18" height="7" rx="3.5"/><circle cx="7.5" cy="7" r="1.6" fill="currentColor" stroke="none"/><rect x="3" y="13.5" width="18" height="7" rx="3.5"/><circle cx="16.5" cy="17" r="1.6" fill="currentColor" stroke="none"/></svg></span>
+      <span class="mb-ico" title="Siri"><span class="mb-siri"></span></span>
+      <span class="mb-clock" id="mb-clock">Mon 15 Jun 10:42 AM</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============ hero (the whole site) ============ -->
+<main class="hero">
+  <div class="shell">
+    <div class="copy">
+      <div class="logo-d reveal d1" style="font-size:clamp(64px,9vw,104px);margin-bottom:18px"><span class="d">d</span><span class="b">B</span></div>
+      <h1 class="h-lead reveal d2" style="margin-bottom:22px">Volume control,<br>app&nbsp;by&nbsp;app.</h1>
+      <p class="sub reveal d3" style="margin:0 0 32px">
+        A separate volume for every app, right from your menu bar.
+        Turn Chrome down without touching Spotify.
+      </p>
+      <div class="reveal d4" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:26px">
+        <a href="https://github.com/routsiddharth/dB/releases/download/v1.0.0/dB-1.0.0.dmg" class="btn">
+          Download for macOS
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12m0 0l-5-5m5 5l5-5M4 20h16"/></svg>
+        </a>
+        <a href="https://github.com/routsiddharth/dB" target="_blank" rel="noopener" class="btn-ghost">View source</a>
+      </div>
+      <div class="reveal d5" style="display:flex;gap:10px;flex-wrap:wrap">
+        <span class="chip"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5h18v9H3z" opacity=".25"/><path d="M3 5h18v2H3zM2 16h20v2H2z"/></svg>macOS menu bar</span>
+        <span class="chip"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Free &amp; open source</span>
+        <span class="chip"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5l14 14M19 5L5 19"/></svg>No drivers</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- popover: absolutely positioned, anchored to the dB menu item -->
+  <div class="pop-wrap reveal d6" id="pop-wrap">
+    <div class="popover" id="hero-mixer" data-mixer></div>
+    <p class="pop-cap">drag the sliders!</p>
+  </div>
+</main>
+
+<script>
+const ICONS = {
+  spotify:  `<img src="assets/icons/spotify.svg" alt="Spotify" width="32" height="32">`,
+  chrome:   `<img src="assets/icons/chrome.svg" alt="Google Chrome" width="32" height="32">`,
+  messages: `<img src="assets/icons/messages.svg" alt="Messages" width="32" height="32">`,
+  system: `<svg viewBox="0 0 24 24"><rect width="24" height="24" rx="6" fill="#8E8E93" opacity="0.2"/><path d="M12 5.3a3.1 3.1 0 0 0-3.1 3.1c0 3.5-1.2 4.5-1.7 5.1-.3.3-.1.9.4.9h8.8c.5 0 .7-.6.4-.9-.5-.6-1.7-1.6-1.7-5.1A3.1 3.1 0 0 0 12 5.3z" fill="#7c7c82"/><path d="M10.4 16.1a1.7 1.7 0 0 0 3.2 0" fill="none" stroke="#7c7c82" stroke-width="1.3" stroke-linecap="round"/></svg>`,
+};
+const SPEAKER = `<span class="glyph"><svg width="19" height="16" viewBox="0 0 22 18" fill="currentColor"><path d="M2 6.5h3.2L9.5 3v12L5.2 11.5H2z"/><path d="M12.5 5.5a4.5 4.5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M15 3a8 8 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>`;
+const RESET = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 5v5h5"/><path d="M4.2 10a8 8 0 1 1-1.2 6"/></svg>`;
+const ELLIPSIS = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5.5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="18.5" cy="12" r="1.7"/></svg>`;
+
+const APPS = [
+  { key:'spotify',  name:'Spotify'       },
+  { key:'chrome',   name:'Google Chrome' },
+  { key:'messages', name:'Messages'      },
+  { key:'system',   name:'System Sounds' },
+];
+
+function buildMixer(el, { vals }={}){
+  el.innerHTML = `
+    <div class="pop-head">
+      <span class="pop-title">Sound Mixer</span>
+      <button class="pop-more" aria-label="More">${ELLIPSIS}</button>
+    </div>`;
+  APPS.forEach((a,i) => {
+    const v = vals ? vals[i] : 0.7;
+    if(i>0){ const d=document.createElement('div'); d.className='pop-div'; el.appendChild(d); }
+    const row = document.createElement('div');
+    row.className = 'prow';
+    row.dataset.key = a.key;
+    row.innerHTML = `
+      <div class="prow-top">
+        <span class="picon">${ICONS[a.key]}</span>
+        <span class="pname">${a.name}</span>
+        <span class="ppct"></span>
+      </div>
+      <div class="prow-ctl">
+        ${SPEAKER}
+        <div class="pslider" role="slider" tabindex="0" aria-label="${a.name} volume" aria-valuemin="0" aria-valuemax="100">
+          <div class="ptrack"><div class="pfill"></div><div class="pthumb"></div></div>
+        </div>
+        <button class="preset" aria-label="Reset ${a.name} to 100%">${RESET}</button>
+      </div>`;
+    el.appendChild(row);
+
+    const fill  = row.querySelector('.pfill');
+    const thumb = row.querySelector('.pthumb');
+    const pct   = row.querySelector('.ppct');
+    const slider= row.querySelector('.pslider');
+    const track = row.querySelector('.ptrack');
+    const reset = row.querySelector('.preset');
+    const state = { v };
+
+    const render = () => {
+      const p = Math.max(0, Math.min(1, state.v));
+      fill.style.width = (p*100) + '%';
+      thumb.style.left = (p*100) + '%';
+      pct.textContent  = Math.round(p*100) + '%';
+      slider.setAttribute('aria-valuenow', Math.round(p*100));
+      reset.disabled = Math.round(p*100) === 100;
+    };
+    render();
+
+    let dragging = false;
+    const setFromX = x => {
+      const r = track.getBoundingClientRect();
+      state.v = Math.max(0, Math.min(1, (x - r.left) / r.width));
+      render();
+    };
+    slider.addEventListener('pointerdown', e => { dragging=true; slider.setPointerCapture?.(e.pointerId); setFromX(e.clientX); });
+    slider.addEventListener('pointermove', e => { if(dragging) setFromX(e.clientX); });
+    const up = () => dragging=false;
+    slider.addEventListener('pointerup', up);
+    slider.addEventListener('pointercancel', up);
+    slider.addEventListener('keydown', e => {
+      const step = e.shiftKey ? 0.1 : 0.05;
+      if(e.key==='ArrowRight'||e.key==='ArrowUp'){ state.v=Math.min(1,state.v+step); render(); e.preventDefault(); }
+      if(e.key==='ArrowLeft' ||e.key==='ArrowDown'){ state.v=Math.max(0,state.v-step); render(); e.preventDefault(); }
+      if(e.key==='Home'){ state.v=0; render(); e.preventDefault(); }
+      if(e.key==='End'){ state.v=1; render(); e.preventDefault(); }
+    });
+    reset.addEventListener('click', () => { state.v=1; render(); });
+  });
+}
+
+/* anchor the popover to the dB menu item:
+   left edge ↔ dB left edge, top edge ↔ dB bottom edge */
+function placePopover(){
+  const db = document.getElementById('mb-db');
+  const wrap = document.getElementById('pop-wrap');
+  if(window.innerWidth < 980){ wrap.style.left = wrap.style.top = ''; return; }
+  const GAP = 10; // small gap below the dB, like a real menu-bar dropdown
+  const r = db.getBoundingClientRect();
+  wrap.style.left = (r.left + window.scrollX) + 'px';
+  wrap.style.top  = (r.bottom + window.scrollY + GAP) + 'px';
+}
+
+/* live menu-bar clock */
+function clock(){
+  const el = document.getElementById('mb-clock');
+  const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const mons = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const fmt = () => {
+    const d = new Date();
+    let h = d.getHours(); const ap = h>=12 ? 'PM':'AM'; h = h%12 || 12;
+    el.textContent = `${days[d.getDay()]} ${d.getDate()} ${mons[d.getMonth()]} ${h}:${String(d.getMinutes()).padStart(2,'0')} ${ap}`;
+    placePopover(); // clock width affects the dB position
+  };
+  fmt(); setInterval(fmt, 10000);
+}
+
+buildMixer(document.getElementById('hero-mixer'), { vals:[1.0, 0.45, 0.80, 0.16] });
+clock();
+placePopover();
+window.addEventListener('resize', placePopover);
+window.addEventListener('load', placePopover);
+</script>
+</body>
+</html>

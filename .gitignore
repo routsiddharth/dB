@@ -5,3 +5,4 @@ dist/
 .swiftpm/
 .vscode/
 CLAUDE.md
+*.dmg
