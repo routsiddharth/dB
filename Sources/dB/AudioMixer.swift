@@ -27,6 +27,12 @@ struct KnownApp: Identifiable, Equatable {
 
 @MainActor
 final class AudioMixer: ObservableObject {
+    /// The live mixer instance, for the AppleScript bridge (see Scripting.swift)
+    /// to reach from an `NSApplication` extension that has no other way to get
+    /// hold of the `@StateObject` SwiftUI owns. Set once in `init()`; there's
+    /// only ever one `AudioMixer` for the app's lifetime.
+    private(set) static weak var shared: AudioMixer?
+
     private static let logger = Logger(subsystem: "com.siddharthrout.dB", category: "AudioMixer")
     private static let volumesDefaultsKey = "perAppVolumes"
     private static let hiddenKeysDefaultsKey = "hiddenAppKeys"
@@ -82,6 +88,8 @@ final class AudioMixer: ObservableObject {
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
+
+        Self.shared = self
     }
 
     // MARK: - Volume control

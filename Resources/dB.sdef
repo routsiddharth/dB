@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
+<dictionary title="dB Terminology">
+
+    <suite name="Standard Suite" code="core" description="Common classes and commands for all applications.">
+        <cocoa name="NSCoreSuite"/>
+
+        <class name="application" code="capp" description="dB's top-level scripting object.">
+            <cocoa class="NSApplication"/>
+            <property name="name" code="pnam" description="The name of the application." type="text" access="r"/>
+            <property name="frontmost" code="pisf" description="Is this the active application?" type="boolean" access="r">
+                <cocoa key="isActive"/>
+            </property>
+            <property name="version" code="vers" description="The version number of the application." type="text" access="r"/>
+            <element type="app volume entry" description="Every app dB currently has a volume slider for.">
+                <cocoa key="appVolumeEntries"/>
+            </element>
+        </class>
+
+        <command name="quit" code="aevtquit" description="Quit dB.">
+            <cocoa class="NSQuitCommand"/>
+        </command>
+    </suite>
+
+    <suite name="dB Suite" code="dBsu" description="Per-app volume control.">
+
+        <class name="app volume entry" code="avle" description="One app's row in dB's mixer, addressable by the app's bundle identifier.">
+            <cocoa class="AppVolumeEntryScriptingObject"/>
+            <property name="id" code="ID  " description="The bundle identifier dB groups this entry's audio under (or &quot;system-sounds&quot; for the System Sounds row)." type="text" access="r">
+                <cocoa key="identifier"/>
+            </property>
+            <property name="name" code="pnam" description="The app's display name." type="text" access="r"/>
+            <property name="app volume" code="avvl" description="The app's volume: 0.0 is silent, 1.0 is full (untapped) volume." type="real" access="rw">
+                <cocoa key="volume"/>
+            </property>
+
+        </class>
+
+    </suite>
+
+</dictionary>
