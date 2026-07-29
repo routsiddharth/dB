@@ -14,6 +14,7 @@ rm -rf dist
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/dB"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+cp Resources/dB.sdef "$APP/Contents/Resources/dB.sdef"
 
 ENTITLEMENTS="Resources/dB.entitlements"
 

@@ -24,6 +24,10 @@
 	<string>14.4</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAppleScriptEnabled</key>
+	<true/>
+	<key>OSAScriptingDefinition</key>
+	<string>dB.sdef</string>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>dB needs access to system audio so it can adjust the volume of individual apps.</string>
 	<key>NSHumanReadableCopyright</key>
