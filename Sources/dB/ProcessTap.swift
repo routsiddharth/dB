@@ -104,9 +104,21 @@ final class ProcessTap {
         }
         aggregateID = aggregate
 
+        // The aggregate's input buffer list holds the sub-device's own input
+        // streams first (e.g. a USB headset's microphone), followed by the tap's
+        // streams. Skip the sub-device's input channels so only tapped audio is
+        // rendered; otherwise output channel 0 (left) is fed from the mic and the
+        // tap's left channel lands on the right ear.
+        let skipChannels = CoreAudioUtils.inputChannelCount(outputDevice)
+
         let state = gainState
         status = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, ioQueue) { _, inputData, _, outputData, _ in
-            ProcessTap.render(input: inputData, output: outputData, gain: state.withLock { $0 })
+            ProcessTap.render(
+                input: inputData,
+                output: outputData,
+                gain: state.withLock { $0 },
+                skipInputChannels: skipChannels
+            )
         }
         guard status == noErr, let ioProcID else {
             throw ProcessTapError.ioProcCreationFailed(status)
@@ -117,7 +129,7 @@ final class ProcessTap {
             throw ProcessTapError.deviceStartFailed(status)
         }
 
-        Self.logger.info("Tap active for \(name, privacy: .public) (\(self.processObjectIDs.count) process(es))")
+        Self.logger.info("Tap active for \(name, privacy: .public) (\(self.processObjectIDs.count) process(es), skipping \(skipChannels) device input channel(s))")
     }
 
     func invalidate() {
@@ -141,31 +153,29 @@ final class ProcessTap {
 
     /// Copies tapped input to the output device buffers, applying gain.
     /// Assumes Float32 samples on both sides (the HAL canonical format).
+    ///
+    /// `skipInputChannels` is the number of leading input channels that belong
+    /// to the output sub-device itself (its microphone, if any) rather than the
+    /// tap. Runs on the real-time IO thread, so it must not allocate.
     private static func render(
         input: UnsafePointer<AudioBufferList>,
         output: UnsafeMutablePointer<AudioBufferList>,
-        gain: Float
+        gain: Float,
+        skipInputChannels: Int
     ) {
         let inList = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
         let outList = UnsafeMutableAudioBufferListPointer(output)
 
-        // Flatten input into per-channel views: (base pointer, stride, frame count).
-        var inChannels: [(base: UnsafeMutablePointer<Float32>, stride: Int, frames: Int)] = []
-        inChannels.reserveCapacity(2)
+        var totalInputChannels = 0
         for buffer in inList {
-            guard let data = buffer.mData else { continue }
-            let channels = max(Int(buffer.mNumberChannels), 1)
-            let frames = Int(buffer.mDataByteSize) / (MemoryLayout<Float32>.size * channels)
-            let base = data.assumingMemoryBound(to: Float32.self)
-            for channel in 0..<channels {
-                inChannels.append((base + channel, channels, frames))
-            }
+            totalInputChannels += max(Int(buffer.mNumberChannels), 1)
         }
+        let tapChannels = totalInputChannels - skipInputChannels
 
         var outChannelIndex = 0
         for buffer in outList {
             guard let data = buffer.mData else { continue }
-            if inChannels.isEmpty {
+            if tapChannels <= 0 {
                 memset(data, 0, Int(buffer.mDataByteSize))
                 continue
             }
@@ -173,10 +183,13 @@ final class ProcessTap {
             let frames = Int(buffer.mDataByteSize) / (MemoryLayout<Float32>.size * channels)
             let base = data.assumingMemoryBound(to: Float32.self)
             for channel in 0..<channels {
-                let source = inChannels[outChannelIndex % inChannels.count]
-                let count = min(frames, source.frames)
-                for frame in 0..<count {
-                    base[frame * channels + channel] = source.base[frame * source.stride] * gain
+                let sourceIndex = skipInputChannels + outChannelIndex % tapChannels
+                var count = 0
+                if let source = inputChannel(inList, at: sourceIndex) {
+                    count = min(frames, source.frames)
+                    for frame in 0..<count {
+                        base[frame * channels + channel] = source.base[frame * source.stride] * gain
+                    }
                 }
                 if count < frames {
                     for frame in count..<frames {
@@ -186,5 +199,24 @@ final class ProcessTap {
                 outChannelIndex += 1
             }
         }
+    }
+
+    /// Returns a strided view of the `index`-th channel across an
+    /// (interleaved or non-interleaved) input buffer list, without allocating.
+    private static func inputChannel(
+        _ list: UnsafeMutableAudioBufferListPointer,
+        at index: Int
+    ) -> (base: UnsafeMutablePointer<Float32>, stride: Int, frames: Int)? {
+        var remaining = index
+        for buffer in list {
+            let channels = max(Int(buffer.mNumberChannels), 1)
+            if remaining < channels {
+                guard let data = buffer.mData else { return nil }
+                let frames = Int(buffer.mDataByteSize) / (MemoryLayout<Float32>.size * channels)
+                return (data.assumingMemoryBound(to: Float32.self) + remaining, channels, frames)
+            }
+            remaining -= channels
+        }
+        return nil
     }
 }

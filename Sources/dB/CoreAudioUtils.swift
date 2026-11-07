@@ -73,6 +73,25 @@ enum CoreAudioUtils {
         return String(cString: buffer)
     }
 
+    /// Total number of input channels a device exposes (0 for output-only devices).
+    static func inputChannelCount(_ device: AudioDeviceID) -> Int {
+        var addr = address(kAudioDevicePropertyStreamConfiguration, scope: kAudioObjectPropertyScopeInput)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(device, &addr, 0, nil, &size) == noErr, size > 0 else {
+            return 0
+        }
+        let raw = UnsafeMutableRawPointer.allocate(
+            byteCount: Int(size),
+            alignment: MemoryLayout<AudioBufferList>.alignment
+        )
+        defer { raw.deallocate() }
+        let listPointer = raw.bindMemory(to: AudioBufferList.self, capacity: 1)
+        guard AudioObjectGetPropertyData(device, &addr, 0, nil, &size, listPointer) == noErr else {
+            return 0
+        }
+        return UnsafeMutableAudioBufferListPointer(listPointer).reduce(0) { $0 + Int($1.mNumberChannels) }
+    }
+
     private static func cfString(object: AudioObjectID, selector: AudioObjectPropertySelector) -> String? {
         var addr = address(selector)
         var value: Unmanaged<CFString>?
